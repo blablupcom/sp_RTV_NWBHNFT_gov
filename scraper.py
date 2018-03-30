@@ -9,7 +9,9 @@ import urllib2
 from datetime import datetime
 from bs4 import BeautifulSoup
 
-#### FUNCTIONS 1.0
+#### FUNCTIONS 1.1
+import requests
+from xml.etree import ElementTree
 
 def validateFilename(filename):
     filenameregex = '^[a-zA-Z0-9]+_[a-zA-Z0-9]+_[a-zA-Z0-9]+_[0-9][0-9][0-9][0-9]_[0-9QY][0-9]$'
@@ -37,20 +39,20 @@ def validateFilename(filename):
 
 def validateURL(url):
     try:
-        r = urllib2.urlopen(url)
+        r = requests.get(url)
         count = 1
-        while r.getcode() == 500 and count < 4:
+        while r.status_code == 500 and count < 4:
             print ("Attempt {0} - Status code: {1}. Retrying.".format(count, r.status_code))
             count += 1
-            r = urllib2.urlopen(url)
+            r = requests.get(url)
         sourceFilename = r.headers.get('Content-Disposition')
 
         if sourceFilename:
             ext = os.path.splitext(sourceFilename)[1].replace('"', '').replace(';', '').replace(' ', '')
         else:
             ext = os.path.splitext(url)[1]
-        validURL = r.getcode() == 200
-        validFiletype = ext.lower() in ['.csv', '.xls', '.xlsx', '.pdf']
+        validURL = r.status_code == 200
+        validFiletype = ext.lower() in ['.csv', '.xls', '.xlsx']
         return validURL, validFiletype
     except:
         print ("Error validating URL.")
@@ -83,37 +85,27 @@ def convert_mth_strings ( mth_string ):
 
 #### VARIABLES 1.0
 
-entity_id = "NFTRNL_NCAHNFT_gov"
-url = "http://www.ncuh.nhs.uk/about-us/trust-expenditure/index.aspx"
+entity_id = "RTV_NWBHNFT_gov"
+url = "http://www.nwbh.nhs.uk/aboutus/_vti_bin/Lists.asmx"
 errors = 0
 data = []
+body = """<soap:Envelope xmlns:xsi='http://www.w3.org/2001/XMLSchema-instance' xmlns:xsd='http://www.w3.org/2001/XMLSchema' xmlns:soap='http://schemas.xmlsoap.org/soap/envelope/'><soap:Body><GetListItems xmlns='http://schemas.microsoft.com/sharepoint/soap/'><listName>Key documents</listName><viewName></viewName><query><Query><Where><Eq><FieldRef Name='Categories0' /><Value Type='Text'>Financial transparency reports</Value></Eq></Where><OrderBy><FieldRef Name='Header_x0020_Position' Ascending='False' /></OrderBy></Query></query><viewFields></viewFields><rowLimit>0</rowLimit><queryOptions><QueryOptions></QueryOptions></queryOptions></GetListItems></soap:Body></soap:Envelope>"""
+ua = {'User-Agent':'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/62.0.3202.62 Safari/537.36', 'content-type': 'text/xml'}
 
 #### READ HTML 1.0
 
-html = urllib2.urlopen(url)
-soup = BeautifulSoup(html, 'lxml')
+html = requests.post(url, data=body, headers=ua)
+dom = ElementTree.fromstring(html.text.encode('utf-8'))
 
 
 #### SCRAPE DATA
-
-blocks = soup.find('p', text=re.compile('Expenditure over')).find_next('ul').find_all('a')
-for block in blocks:
-    url = 'http://www.ncuh.nhs.uk'+block['href']
-    csvMth = block.text[:3]
-    csvYr = '2018'
-archive_blocks = soup.find('p', text=re.compile('Expenditure over')).find_all_next('ul')[1].find_all('a')
-for archive_block in archive_blocks:
-    archive_link = 'http://www.ncuh.nhs.uk'+archive_block['href']
-    archive_html = urllib2.urlopen(archive_link)
-    archive_soup = BeautifulSoup(archive_html, 'lxml')
-    arch_blocks = archive_soup.find('h1').find_next('ul').find_all('a')
-    for arch_block in arch_blocks:
-        if 'http' not in arch_block['href']:
-            url = 'http://www.ncuh.nhs.uk' + arch_block['href']
-        else:
-            url = arch_block['href']
-        csvMth = arch_block.text[:3]
-        csvYr = archive_soup.find('h1').text.strip()[-4:]
+names = dom.findall('RowsetSchema')
+for item in dom.getiterator():
+    title = item.get('ows_Title')
+    if title:
+        url = 'http://www.nwbh.nhs.uk/'+item.get('ows_FileRef').split('#')[-1]
+        csvMth = title.split()[0].strip()[:3]
+        csvYr = title.split()[1].strip()[:4]
         csvMth = convert_mth_strings(csvMth.upper())
         data.append([csvYr, csvMth, url])
 
